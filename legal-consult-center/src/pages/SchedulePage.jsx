@@ -1,0 +1,481 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  Calendar,
+  Table,
+  Modal,
+  Form,
+  Select,
+  Tag,
+  Badge,
+  Button,
+  Card,
+  Space,
+  message,
+  Descriptions,
+  Popconfirm,
+  DatePicker,
+  Checkbox,
+  Input,
+} from 'antd';
+import dayjs from 'dayjs';
+import {
+  getData,
+  subscribe,
+  addSchedule,
+  deleteSchedule,
+  addLeave,
+  removeLeave,
+  approveAddSlot,
+  rejectAddSlot,
+  nextId,
+  TIME_SLOTS,
+  LAWYERS,
+} from '../store/dataStore';
+
+const LICENSE_MAP = { active: '正常执业', suspended: '暂停执业' };
+
+const LAWYER_COLORS = [
+  '#1677ff', '#52c41a', '#fa8c16', '#722ed1',
+  '#eb2f96', '#13c2c2', '#f5222d', '#2f54eb',
+];
+
+export default function SchedulePage() {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    return subscribe(() => setTick((t) => t + 1));
+  }, []);
+  const data = getData();
+
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [detailVisible, setDetailVisible] = useState(false);
+  const [addLeaveVisible, setAddLeaveVisible] = useState(false);
+  const [filterLawyer, setFilterLawyer] = useState(null);
+  const [calendarDate, setCalendarDate] = useState(dayjs());
+  const [leaveForm] = Form.useForm();
+
+  const lawyerMap = useMemo(() => {
+    const m = {};
+    LAWYERS.forEach((l) => (m[l.id] = l));
+    return m;
+  }, []);
+
+  const leaveMap = useMemo(() => {
+    const m = {};
+    data.leaves
+      .filter((l) => l.status === 'approved')
+      .forEach((l) => {
+        if (!m[l.date]) m[l.date] = {};
+        if (!m[l.date][l.lawyerId]) m[l.date][l.lawyerId] = new Set();
+        l.timeSlots.forEach((ts) => m[l.date][l.lawyerId].add(ts));
+      });
+    return m;
+  }, [data.leaves]);
+
+  const scheduleMap = useMemo(() => {
+    const m = {};
+    data.schedules.forEach((s) => {
+      if (!m[s.date]) m[s.date] = [];
+      m[s.date].push(s);
+    });
+    return m;
+  }, [data.schedules]);
+
+  const dateCellRender = (value) => {
+    const dateStr = value.format('YYYY-MM-DD');
+    const daySchedules = scheduleMap[dateStr] || [];
+    const dayLeaves = leaveMap[dateStr] || {};
+
+    const filtered = filterLawyer
+      ? daySchedules.filter((s) => s.lawyerId === filterLawyer)
+      : daySchedules;
+
+    return (
+      <div style={{ padding: '0 4px' }}>
+        {filtered.map((sch) => {
+          const lawyer = lawyerMap[sch.lawyerId];
+          if (!lawyer) return null;
+          const colorIdx = LAWYERS.findIndex((l) => l.id === sch.lawyerId) % LAWYER_COLORS.length;
+          const hasLeave = dayLeaves[sch.lawyerId];
+          const leaveSlotCount = hasLeave ? hasLeave.size : 0;
+          const totalSlots = sch.timeSlots.length;
+          const availableCount = totalSlots - leaveSlotCount;
+
+          let status = 'processing';
+          let statusText = '已排班';
+          if (availableCount <= 0) {
+            status = 'error';
+            statusText = '已请假';
+          } else if (availableCount === totalSlots) {
+            status = 'success';
+            statusText = '可预约';
+          }
+
+          return (
+            <div key={sch.lawyerId} style={{ marginBottom: 2 }}>
+              <Badge
+                status={status}
+                text={
+                  <span style={{ fontSize: 11, color: LAWYER_COLORS[colorIdx] }}>
+                    {lawyer.name}({statusText})
+                  </span>
+                }
+              />
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const onSelectDate = (value) => {
+    setSelectedDate(value.format('YYYY-MM-DD'));
+    setDetailVisible(true);
+  };
+
+  const dayDetails = useMemo(() => {
+    if (!selectedDate) return { schedules: [], leaves: [] };
+    const daySchedules = scheduleMap[selectedDate] || [];
+    const dayLeaves = data.leaves.filter(
+      (l) => l.date === selectedDate && l.status === 'approved'
+    );
+    const dayAppointments = data.appointments.filter(
+      (a) => a.date === selectedDate && a.status !== 'cancelled'
+    );
+    const bookedMap = {};
+    dayAppointments.forEach((a) => {
+      const key = `${a.lawyerId}-${a.timeSlot}`;
+      if (!bookedMap[key]) bookedMap[key] = 0;
+      bookedMap[key]++;
+    });
+    return { schedules: daySchedules, leaves: dayLeaves, bookedMap };
+  }, [selectedDate, scheduleMap, data.leaves, data.appointments]);
+
+  const handleAddLeave = () => {
+    leaveForm.validateFields().then((values) => {
+      const lawyer = lawyerMap[values.lawyerId];
+      const leave = {
+        id: nextId('leave'),
+        lawyerId: values.lawyerId,
+        date: values.date.format('YYYY-MM-DD'),
+        timeSlots: values.timeSlots,
+        reason: values.reason,
+        status: 'approved',
+      };
+      addLeave(leave);
+      message.success(`已为律师 ${lawyer?.name} 添加请假记录`);
+      leaveForm.resetFields();
+      setAddLeaveVisible(false);
+    });
+  };
+
+  const handleCancelLeave = (id) => {
+    removeLeave(id);
+    message.success('已撤销请假');
+  };
+
+  const leaveColumns = [
+    {
+      title: '律师',
+      dataIndex: 'lawyerId',
+      key: 'lawyer',
+      render: (id) => lawyerMap[id]?.name || id,
+    },
+    { title: '日期', dataIndex: 'date', key: 'date' },
+    {
+      title: '请假时段',
+      dataIndex: 'timeSlots',
+      key: 'timeSlots',
+      render: (slots) => slots.map((s) => <Tag key={s}>{s}</Tag>),
+    },
+    { title: '原因', dataIndex: 'reason', key: 'reason' },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      render: (s) => {
+        const map = { approved: '已批准', pending: '待审批', rejected: '已拒绝' };
+        const colorMap = { approved: 'green', pending: 'orange', rejected: 'red' };
+        return <Tag color={colorMap[s] || 'default'}>{map[s] || s}</Tag>;
+      },
+    },
+    {
+      title: '操作',
+      key: 'action',
+      render: (_, record) => (
+        <Popconfirm
+          title="确认撤销此请假记录？"
+          onConfirm={() => handleCancelLeave(record.id)}
+          okText="确认"
+          cancelText="取消"
+        >
+          <Button type="link" danger size="small">
+            撤销
+          </Button>
+        </Popconfirm>
+      ),
+    },
+  ];
+
+  const addSlotColumns = [
+    {
+      title: '律师',
+      dataIndex: 'lawyerId',
+      key: 'lawyer',
+      render: (id) => lawyerMap[id]?.name || id,
+    },
+    { title: '日期', dataIndex: 'date', key: 'date' },
+    { title: '时段', dataIndex: 'timeSlot', key: 'timeSlot' },
+    { title: '原因', dataIndex: 'reason', key: 'reason' },
+    { title: '申请人', dataIndex: 'requestedBy', key: 'requestedBy' },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      render: (s) => {
+        const map = { pending: '待审批', approved: '已批准', rejected: '已拒绝' };
+        const colorMap = { pending: 'orange', approved: 'green', rejected: 'red' };
+        return <Tag color={colorMap[s] || 'default'}>{map[s] || s}</Tag>;
+      },
+    },
+    {
+      title: '申请时间',
+      dataIndex: 'createdAt',
+      key: 'createdAt',
+    },
+    {
+      title: '操作',
+      key: 'action',
+      render: (_, record) =>
+        record.status !== 'pending' ? null : (
+          <Space>
+            <Popconfirm
+              title="确认批准此加号申请？"
+              onConfirm={() => {
+                approveAddSlot(record.id);
+                message.success('已批准加号');
+              }}
+              okText="确认"
+              cancelText="取消"
+            >
+              <Button type="link" size="small">批准</Button>
+            </Popconfirm>
+            <Popconfirm
+              title="确认拒绝此加号申请？"
+              onConfirm={() => {
+                rejectAddSlot(record.id);
+                message.info('已拒绝加号');
+              }}
+              okText="确认"
+              cancelText="取消"
+            >
+              <Button type="link" danger size="small">拒绝</Button>
+            </Popconfirm>
+          </Space>
+        ),
+    },
+  ];
+
+  return (
+    <div>
+      <Card title="排班日历" style={{ marginBottom: 16 }}>
+        <Space style={{ marginBottom: 16 }} wrap>
+          <span>筛选律师：</span>
+          <Select
+            allowClear
+            placeholder="全部律师"
+            style={{ width: 160 }}
+            value={filterLawyer}
+            onChange={(v) => setFilterLawyer(v || null)}
+          >
+            {LAWYERS.map((l) => (
+              <Select.Option key={l.id} value={l.id}>
+                {l.name}（{LICENSE_MAP[l.licenseStatus]}）
+              </Select.Option>
+            ))}
+          </Select>
+        </Space>
+        <Calendar
+          value={calendarDate}
+          onChange={(v) => setCalendarDate(v)}
+          onSelect={onSelectDate}
+          cellRender={(current, info) => {
+            if (info.type === 'date') return dateCellRender(current);
+            return info.originNode;
+          }}
+        />
+      </Card>
+
+      <Modal
+        title={`${selectedDate} 排班详情`}
+        open={detailVisible}
+        onCancel={() => setDetailVisible(false)}
+        footer={null}
+        width={720}
+      >
+        {dayDetails.schedules.length === 0 && dayDetails.leaves.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 32, color: '#999' }}>
+            当日无排班和请假记录
+          </div>
+        ) : (
+          <>
+            {dayDetails.schedules.map((sch) => {
+              const lawyer = lawyerMap[sch.lawyerId];
+              if (!lawyer) return null;
+              const lawyerLeaves = dayDetails.leaves.filter(
+                (l) => l.lawyerId === sch.lawyerId
+              );
+              const leaveSlots = new Set();
+              lawyerLeaves.forEach((l) => l.timeSlots.forEach((ts) => leaveSlots.add(ts)));
+
+              return (
+                <Descriptions
+                  key={sch.id}
+                  title={
+                    <Space>
+                      <span>{lawyer.name}</span>
+                      <Tag color={lawyer.licenseStatus === 'active' ? 'green' : 'red'}>
+                        {LICENSE_MAP[lawyer.licenseStatus]}
+                      </Tag>
+                    </Space>
+                  }
+                  bordered
+                  size="small"
+                  column={1}
+                  style={{ marginBottom: 16 }}
+                >
+                  <Descriptions.Item label="排班时段">
+                    <Space wrap>
+                      {sch.timeSlots.map((ts) => {
+                        const booked = dayDetails.bookedMap[`${sch.lawyerId}-${ts.key}`] || 0;
+                        const isLeave = leaveSlots.has(ts.key);
+                        return (
+                          <Tag
+                            key={ts.key}
+                            color={isLeave ? 'red' : booked >= ts.capacity ? 'default' : 'blue'}
+                          >
+                            {ts.key}{' '}
+                            {isLeave
+                              ? '(请假)'
+                              : `${booked}/${ts.capacity}`}
+                          </Tag>
+                        );
+                      })}
+                    </Space>
+                  </Descriptions.Item>
+                  {lawyerLeaves.length > 0 && (
+                    <Descriptions.Item label="请假信息">
+                      {lawyerLeaves.map((l) => (
+                        <div key={l.id}>
+                          <Tag color="red">请假</Tag>
+                          时段: {l.timeSlots.join('、')} | 原因: {l.reason}
+                        </div>
+                      ))}
+                    </Descriptions.Item>
+                  )}
+                </Descriptions>
+              );
+            })}
+            {dayDetails.leaves.filter(
+              (l) => !dayDetails.schedules.some((s) => s.lawyerId === l.lawyerId)
+            ).length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontWeight: 'bold', marginBottom: 8 }}>其他请假记录：</div>
+                {dayDetails.leaves
+                  .filter((l) => !dayDetails.schedules.some((s) => s.lawyerId === l.lawyerId))
+                  .map((l) => (
+                    <div key={l.id} style={{ marginBottom: 4 }}>
+                      <Tag color="red">请假</Tag>
+                      {lawyerMap[l.lawyerId]?.name || l.lawyerId} — 时段: {l.timeSlots.join('、')} | 原因: {l.reason}
+                    </div>
+                  ))}
+              </div>
+            )}
+          </>
+        )}
+      </Modal>
+
+      <Card
+        title="请假管理"
+        style={{ marginBottom: 16 }}
+        extra={
+          <Button type="primary" onClick={() => setAddLeaveVisible(true)}>
+            新增请假
+          </Button>
+        }
+      >
+        <Table
+          dataSource={data.leaves}
+          columns={leaveColumns}
+          rowKey="id"
+          size="small"
+          pagination={{ pageSize: 5 }}
+        />
+      </Card>
+
+      <Modal
+        title="新增请假"
+        open={addLeaveVisible}
+        onOk={handleAddLeave}
+        onCancel={() => {
+          leaveForm.resetFields();
+          setAddLeaveVisible(false);
+        }}
+        okText="提交"
+        cancelText="取消"
+      >
+        <Form form={leaveForm} layout="vertical">
+          <Form.Item
+            name="lawyerId"
+            label="律师"
+            rules={[{ required: true, message: '请选择律师' }]}
+          >
+            <Select placeholder="请选择律师">
+              {LAWYERS.map((l) => (
+                <Select.Option key={l.id} value={l.id}>
+                  {l.name}（{LICENSE_MAP[l.licenseStatus]}）
+                </Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item
+            name="date"
+            label="请假日期"
+            rules={[{ required: true, message: '请选择日期' }]}
+          >
+            <DatePicker style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item
+            name="timeSlots"
+            label="请假时段"
+            rules={[{ required: true, message: '请选择时段' }]}
+          >
+            <Checkbox.Group>
+              {TIME_SLOTS.map((ts) => (
+                <Checkbox key={ts.key} value={ts.key}>
+                  {ts.label}
+                </Checkbox>
+              ))}
+            </Checkbox.Group>
+          </Form.Item>
+          <Form.Item
+            name="reason"
+            label="请假原因"
+            rules={[{ required: true, message: '请输入原因' }]}
+          >
+            <Input placeholder="请输入请假原因" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Card title="加号审批">
+        <Table
+          dataSource={data.addSlotRequests}
+          columns={addSlotColumns}
+          rowKey="id"
+          size="small"
+          pagination={{ pageSize: 5 }}
+        />
+      </Card>
+    </div>
+  );
+}

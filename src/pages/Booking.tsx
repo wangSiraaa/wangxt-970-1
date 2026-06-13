@@ -22,7 +22,7 @@ export default function BookingPage() {
   const [conflictAptId, setConflictAptId] = useState('')
   const [toast, setToast] = useState('')
 
-  const availableSlots = useMemo(() => store.getAvailableSlots(selectedDate), [selectedDate, store])
+  const availableSlots = useMemo(() => store.getAvailableSlots(selectedDate), [selectedDate, store.schedules, store.leaves, store.appointments])
 
   const myAppointments = useMemo(() => {
     if (store.currentRole !== 'citizen') return store.appointments.filter(a => a.status !== 'cancelled')
