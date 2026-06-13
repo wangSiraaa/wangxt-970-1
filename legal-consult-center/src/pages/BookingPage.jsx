@@ -18,6 +18,10 @@ import {
   Tooltip,
   Descriptions,
   Popconfirm,
+  Row,
+  Col,
+  List,
+  Avatar,
 } from 'antd';
 import {
   SearchOutlined,
@@ -36,10 +40,14 @@ import {
   validateBooking,
   addWaitlistEntry,
   cancelAppointment,
+  generateReallocationSuggestions,
+  getReallocationSuggestions,
   CASE_TYPES,
   MATERIALS,
   TIME_SLOTS,
   LAWYERS,
+  URGENCY_LEVELS,
+  REPRESENTED_UNITS,
 } from '../store/dataStore';
 
 const STATUS_MAP = {
@@ -79,12 +87,18 @@ export default function BookingPage() {
   const [citizenName, setCitizenName] = useState('');
   const [citizenIdCard, setCitizenIdCard] = useState('');
   const [citizenPhone, setCitizenPhone] = useState('');
+  const [caseReason, setCaseReason] = useState('');
+  const [opposingParty, setOpposingParty] = useState('');
+  const [opposingPartyUnit, setOpposingPartyUnit] = useState(null);
+  const [urgency, setUrgency] = useState('normal');
   const [checkedMaterials, setCheckedMaterials] = useState([]);
   const [validationResults, setValidationResults] = useState(null);
   const [conflictResults, setConflictResults] = useState(null);
+  const [reallocationSuggestions, setReallocationSuggestions] = useState(null);
   const [bookingResult, setBookingResult] = useState(null);
   const [conflictConfirmed, setConflictConfirmed] = useState(false);
   const [materialAlertDismissed, setMaterialAlertDismissed] = useState(false);
+  const [showReallocation, setShowReallocation] = useState(false);
 
   const [myIdCard, setMyIdCard] = useState('');
   const [myAppointments, setMyAppointments] = useState([]);
@@ -223,18 +237,31 @@ export default function BookingPage() {
       citizenName: citizenName.trim(),
       citizenIdCard: citizenIdCard.trim(),
       citizenPhone: citizenPhone.trim(),
+      caseReason: caseReason.trim(),
+      opposingParty: opposingParty.trim(),
+      opposingPartyUnit,
+      urgency,
       materials: checkedMaterials,
     };
     const errors = validateBooking(booking);
     const conflicts = checkInterestConflict(
       booking.citizenIdCard,
       booking.lawyerId,
-      booking.caseType
+      booking.caseType,
+      booking.opposingPartyUnit
     );
     setValidationResults(errors);
     setConflictResults(conflicts);
     setConflictConfirmed(false);
     setMaterialAlertDismissed(false);
+    setReallocationSuggestions(null);
+    setShowReallocation(false);
+  };
+
+  const loadReallocationSuggestions = (appointmentId) => {
+    const result = generateReallocationSuggestions(appointmentId, 'all');
+    setReallocationSuggestions(result);
+    setShowReallocation(true);
   };
 
   const hardErrors = useMemo(() => {
@@ -263,6 +290,10 @@ export default function BookingPage() {
       citizenName: citizenName.trim(),
       citizenIdCard: citizenIdCard.trim(),
       citizenPhone: citizenPhone.trim(),
+      caseReason: caseReason.trim(),
+      opposingParty: opposingParty.trim(),
+      opposingPartyUnit,
+      urgency,
       materials: checkedMaterials,
     };
     const result = createAppointment(booking);
@@ -288,12 +319,18 @@ export default function BookingPage() {
     setCitizenName('');
     setCitizenIdCard('');
     setCitizenPhone('');
+    setCaseReason('');
+    setOpposingParty('');
+    setOpposingPartyUnit(null);
+    setUrgency('normal');
     setCheckedMaterials([]);
     setValidationResults(null);
     setConflictResults(null);
+    setReallocationSuggestions(null);
     setBookingResult(null);
     setConflictConfirmed(false);
     setMaterialAlertDismissed(false);
+    setShowReallocation(false);
   };
 
   const handleSearchMyAppointments = () => {
@@ -345,6 +382,15 @@ export default function BookingPage() {
       dataIndex: 'caseType',
       key: 'caseType',
       render: (ct) => CASE_TYPES.find((c) => c.id === ct)?.name || ct,
+    },
+    {
+      title: '紧急程度',
+      dataIndex: 'urgency',
+      key: 'urgency',
+      render: (u) => {
+        const level = URGENCY_LEVELS.find((l) => l.id === u);
+        return level ? <Tag color={level.color}>{level.name}</Tag> : u;
+      },
     },
     {
       title: '状态',
@@ -511,7 +557,7 @@ export default function BookingPage() {
       case 2:
         return (
           <Card
-            title="填写群众信息"
+            title="填写案件与个人信息"
             extra={
               <Button onClick={handleStep3Back}>返回选择时段</Button>
             }
@@ -523,31 +569,104 @@ export default function BookingPage() {
               <Descriptions.Item label="案件类型">{currentCaseType?.name}</Descriptions.Item>
             </Descriptions>
             <Form layout="vertical">
-              <Form.Item label="姓名" required>
-                <Input
-                  prefix={<UserOutlined />}
-                  placeholder="请输入姓名"
-                  value={citizenName}
-                  onChange={(e) => setCitizenName(e.target.value)}
-                  maxLength={20}
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item label="姓名" required>
+                    <Input
+                      prefix={<UserOutlined />}
+                      placeholder="请输入姓名"
+                      value={citizenName}
+                      onChange={(e) => setCitizenName(e.target.value)}
+                      maxLength={20}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item label="身份证号" required>
+                    <Input
+                      placeholder="请输入身份证号"
+                      value={citizenIdCard}
+                      onChange={(e) => setCitizenIdCard(e.target.value)}
+                      maxLength={18}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item label="联系电话" required>
+                    <Input
+                      placeholder="请输入联系电话"
+                      value={citizenPhone}
+                      onChange={(e) => setCitizenPhone(e.target.value)}
+                      maxLength={11}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item label="紧急程度" required>
+                    <Select
+                      value={urgency}
+                      onChange={setUrgency}
+                      style={{ width: '100%' }}
+                    >
+                      {URGENCY_LEVELS.map((level) => (
+                        <Select.Option key={level.id} value={level.id}>
+                          <Tag color={level.color}>{level.name}</Tag> - {level.description}
+                        </Select.Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Form.Item label="案由（简述案件情况）">
+                <Input.TextArea
+                  rows={3}
+                  placeholder="请简要描述您的案件事由"
+                  value={caseReason}
+                  onChange={(e) => setCaseReason(e.target.value)}
+                  maxLength={200}
+                  showCount
                 />
               </Form.Item>
-              <Form.Item label="身份证号" required>
-                <Input
-                  placeholder="请输入身份证号"
-                  value={citizenIdCard}
-                  onChange={(e) => setCitizenIdCard(e.target.value)}
-                  maxLength={18}
-                />
-              </Form.Item>
-              <Form.Item label="联系电话" required>
-                <Input
-                  placeholder="请输入联系电话"
-                  value={citizenPhone}
-                  onChange={(e) => setCitizenPhone(e.target.value)}
-                  maxLength={11}
-                />
-              </Form.Item>
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item label="对方当事人">
+                    <Input
+                      placeholder="请输入对方当事人姓名"
+                      value={opposingParty}
+                      onChange={(e) => setOpposingParty(e.target.value)}
+                      maxLength={50}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item label="对方单位（选填）">
+                    <Select
+                      allowClear
+                      showSearch
+                      placeholder="请选择或搜索对方单位"
+                      value={opposingPartyUnit}
+                      onChange={setOpposingPartyUnit}
+                      style={{ width: '100%' }}
+                      optionFilterProp="children"
+                    >
+                      {REPRESENTED_UNITS.map((unit) => (
+                        <Select.Option key={unit.id} value={unit.id}>
+                          {unit.name}（{unit.type}）
+                        </Select.Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Alert
+                type="info"
+                message="利益冲突提示"
+                description="填写对方单位后，系统将自动检测律师是否存在利益冲突"
+                showIcon
+                style={{ marginBottom: 16 }}
+              />
               <Form.Item>
                 <Button type="primary" onClick={handleStep3Next}>
                   下一步：材料确认
@@ -642,22 +761,47 @@ export default function BookingPage() {
                 {conflictResults.map((conflict, i) => (
                   <Alert
                     key={i}
-                    type="warning"
-                    message={`【冲突提示】${conflict.type}`}
+                    type={conflict.severity === 'hard' ? 'error' : 'warning'}
+                    message={`【${conflict.severity === 'hard' ? '硬冲突' : '冲突提示'}】${conflict.type}`}
                     description={conflict.description}
                     showIcon
                     style={{ marginBottom: 8 }}
                     action={
-                      !conflictConfirmed && (
-                        <Button
-                          size="small"
-                          type="primary"
-                          danger
-                          onClick={() => setConflictConfirmed(true)}
-                        >
-                          确认知悉，继续预约
-                        </Button>
-                      )
+                      !conflictConfirmed ? (
+                        <Space size="small">
+                          <Button
+                            size="small"
+                            onClick={() => {
+                              const tempApt = {
+                                id: 'temp-check',
+                                lawyerId: selectedSlot.lawyerId,
+                                date: dateStr,
+                                timeSlot: selectedSlot.timeSlot,
+                                caseType,
+                                citizenIdCard: citizenIdCard.trim(),
+                                opposingPartyUnit,
+                              };
+                              const result = getReallocationSuggestions(
+                                tempApt
+                              );
+                              setReallocationSuggestions(result);
+                              setShowReallocation(true);
+                            }}
+                          >
+                            查看改派建议
+                          </Button>
+                          {conflict.severity !== 'hard' && (
+                            <Button
+                              size="small"
+                              type="primary"
+                              danger
+                              onClick={() => setConflictConfirmed(true)}
+                            >
+                              确认知悉，继续预约
+                            </Button>
+                          )}
+                        </Space>
+                      ) : null
                     }
                   />
                 ))}
@@ -833,6 +977,97 @@ export default function BookingPage() {
           </Space>
         </Card>
       </div>
+
+      <Modal
+        title="智能改派建议"
+        open={showReallocation}
+        onCancel={() => setShowReallocation(false)}
+        footer={[
+          <Button key="close" onClick={() => setShowReallocation(false)}>
+            关闭
+          </Button>,
+        ]}
+        width={600}
+      >
+        {reallocationSuggestions && (
+          <div>
+            {reallocationSuggestions.invalidReasons?.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <h4 style={{ marginBottom: 8 }}>原预约失效原因</h4>
+                {reallocationSuggestions.invalidReasons.map((r, i) => (
+                  <Alert
+                    key={i}
+                    type="error"
+                    message={r.type}
+                    description={r.reason}
+                    showIcon
+                    style={{ marginBottom: 8 }}
+                  />
+                ))}
+              </div>
+            )}
+            <h4 style={{ marginBottom: 8 }}>推荐律师</h4>
+            {reallocationSuggestions.suggestions?.length > 0 ? (
+              <>
+                <Alert
+                  type="success"
+                  message={`找到 ${reallocationSuggestions.suggestions.length} 位可改派律师`}
+                  description="按专业匹配度、剩余名额、同类案件经验综合评分排序"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                />
+                <List
+                  dataSource={reallocationSuggestions.suggestions}
+                  renderItem={(item, index) => (
+                    <List.Item
+                      actions={[
+                        <Tag color="blue" key="score">
+                          综合评分：{item.score}
+                        </Tag>,
+                      ]}
+                    >
+                      <List.Item.Meta
+                        avatar={
+                          <Avatar
+                            style={{
+                              backgroundColor:
+                                index === 0
+                                  ? '#f5222d'
+                                  : index === 1
+                                  ? '#fa8c16'
+                                  : '#52c41a',
+                            }}
+                          >
+                            {index + 1}
+                          </Avatar>
+                        }
+                        title={
+                          <Space>
+                            <span>{item.lawyerName}</span>
+                            <Tag color="green">剩余 {item.remaining} 个名额</Tag>
+                          </Space>
+                        }
+                        description={
+                          <div>
+                            <div>专业方向：{specialtyNames(item.specialties)}</div>
+                            <div style={{ color: '#1890ff' }}>{item.reason}</div>
+                          </div>
+                        }
+                      />
+                    </List.Item>
+                  )}
+                />
+              </>
+            ) : (
+              <Result
+                status="warning"
+                title="暂无可改派律师"
+                subTitle="当前时段暂无符合条件的其他律师，建议更换时段或案件类型"
+              />
+            )}
+          </div>
+        )}
+      </Modal>
 
       <Modal
         title="加入候补"

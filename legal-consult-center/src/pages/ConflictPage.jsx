@@ -37,10 +37,12 @@ import {
   getConflictMatrix,
   reallocateAppointment,
   checkInterestConflict,
+  generateReallocationSuggestions,
   LAWYERS,
   CASE_TYPES,
   TIME_SLOTS,
   RECUSAL_RELATIONS,
+  URGENCY_LEVELS,
 } from '../store/dataStore';
 
 const { TextArea } = Input;
@@ -73,6 +75,7 @@ export default function ConflictPage() {
   const [reallocateReason, setReallocateReason] = useState('');
   const [reallocateResult, setReallocateResult] = useState(null);
   const [reallocationModalVisible, setReallocationModalVisible] = useState(false);
+  const [reallocationSuggestions, setReallocationSuggestions] = useState(null);
 
   // Tab 4: 回避关系维护
   const [addRecusalVisible, setAddRecusalVisible] = useState(false);
@@ -268,53 +271,27 @@ export default function ConflictPage() {
     );
   }, [tick]);
 
+  useEffect(() => {
+    if (selectedAppointment && reallocationModalVisible) {
+      const result = generateReallocationSuggestions(selectedAppointment.id, 'all');
+      setReallocationSuggestions(result);
+    } else {
+      setReallocationSuggestions(null);
+    }
+  }, [selectedAppointment, reallocationModalVisible]);
+
   const candidateLawyers = useMemo(() => {
-    if (!selectedAppointment) return [];
-    const apt = selectedAppointment;
-    const oldLawyer = LAWYERS.find((l) => l.id === apt.lawyerId);
-    if (!oldLawyer) return [];
-
-    const dayLeaves = data.leaves.filter(
-      (l) => l.date === apt.date && l.status === 'approved'
-    );
-    const leaveLawyerSlots = {};
-    dayLeaves.forEach((l) => {
-      if (!leaveLawyerSlots[l.lawyerId]) leaveLawyerSlots[l.lawyerId] = new Set();
-      l.timeSlots.forEach((ts) => leaveLawyerSlots[l.lawyerId].add(ts));
-    });
-
-    const daySchedules = data.schedules.filter((s) => s.date === apt.date);
-    const dayBooked = data.appointments.filter(
-      (a) => a.date === apt.date && a.status !== 'cancelled'
-    );
-    const slotBookedMap = {};
-    dayBooked.forEach((a) => {
-      const key = `${a.lawyerId}-${a.timeSlot}`;
-      if (!slotBookedMap[key]) slotBookedMap[key] = 0;
-      slotBookedMap[key]++;
-    });
-
-    return LAWYERS.filter((l) => {
-      if (l.id === apt.lawyerId) return false;
-      if (l.licenseStatus !== 'active') return false;
-      if (!l.specialties.includes(apt.caseType)) return false;
-      const hasRecusal = data.recusalRelations.some(
-        (r) =>
-          (r.lawyerId === apt.lawyerId && r.relatedLawyerId === l.id) ||
-          (r.lawyerId === l.id && r.relatedLawyerId === apt.lawyerId)
-      );
-      if (hasRecusal) return false;
-      const leaveSlots = leaveLawyerSlots[l.id];
-      if (leaveSlots && leaveSlots.has(apt.timeSlot)) return false;
-      const sch = daySchedules.find((s) => s.lawyerId === l.id);
-      if (!sch) return false;
-      const ts = sch.timeSlots.find((t) => t.key === apt.timeSlot);
-      if (!ts) return false;
-      const booked = slotBookedMap[`${l.id}-${apt.timeSlot}`] || 0;
-      if (booked >= ts.capacity) return false;
-      return true;
-    });
-  }, [selectedAppointment, data, tick]);
+    if (!reallocationSuggestions?.suggestions) return [];
+    return reallocationSuggestions.suggestions.map((s) => {
+      const lawyer = LAWYERS.find((l) => l.id === s.lawyerId);
+      return {
+        ...lawyer,
+        score: s.score,
+        remaining: s.remaining,
+        reason: s.reason,
+      };
+    }).filter(Boolean);
+  }, [reallocationSuggestions]);
 
   const handleReallocateNext = () => {
     if (reallocateStep === 0 && !selectedAppointment) {
@@ -423,6 +400,15 @@ export default function ConflictPage() {
                   render: (ct) => getCaseTypeName(ct),
                 },
                 {
+                  title: '紧急程度',
+                  dataIndex: 'urgency',
+                  key: 'urgency',
+                  render: (u) => {
+                    const level = URGENCY_LEVELS.find((l) => l.id === u);
+                    return level ? <Tag color={level.color}>{level.name}</Tag> : '-';
+                  },
+                },
+                {
                   title: '状态',
                   dataIndex: 'status',
                   key: 'status',
@@ -472,10 +458,37 @@ export default function ConflictPage() {
                   <Descriptions.Item label="案件类型">
                     {getCaseTypeName(selectedAppointment.caseType)}
                   </Descriptions.Item>
+                  <Descriptions.Item label="紧急程度">
+                    {(() => {
+                      const level = URGENCY_LEVELS.find((l) => l.id === selectedAppointment.urgency);
+                      return level ? <Tag color={level.color}>{level.name}</Tag> : '-';
+                    })()}
+                  </Descriptions.Item>
                   <Descriptions.Item label="状态">
                     <Tag color="blue">{selectedAppointment.status}</Tag>
                   </Descriptions.Item>
+                  <Descriptions.Item label="对方当事人">
+                    {selectedAppointment.opposingParty || '-'}
+                  </Descriptions.Item>
                 </Descriptions>
+                {reallocationSuggestions?.invalidReasons?.length > 0 && (
+                  <div style={{ marginTop: 16 }}>
+                    <div style={{ marginBottom: 8, fontWeight: 'bold' }}>
+                      <ExclamationCircleOutlined style={{ color: '#ff4d4f', marginRight: 8 }} />
+                      原预约失效原因
+                    </div>
+                    {reallocationSuggestions.invalidReasons.map((r, i) => (
+                      <Alert
+                        key={i}
+                        type="error"
+                        message={r.type}
+                        description={r.reason}
+                        showIcon
+                        style={{ marginBottom: 8 }}
+                      />
+                    ))}
+                  </div>
+                )}
                 {selectedConflict && (
                   <div style={{ marginTop: 16 }}>
                     <Alert
@@ -532,10 +545,10 @@ export default function ConflictPage() {
 
       case 2:
         return (
-          <Card title="选择新律师" size="small">
+          <Card title="选择新律师（智能推荐）" size="small">
             <Alert
               type="info"
-              message="筛选条件：专业匹配、执业证有效、无回避关系、未请假、有余量"
+              message="智能推荐：综合专业匹配度、剩余名额、同类案件经验评分排序"
               showIcon
               style={{ marginBottom: 12 }}
             />
@@ -548,9 +561,10 @@ export default function ConflictPage() {
               />
             ) : (
               <Table
-                dataSource={candidateLawyers.map((l) => ({
+                dataSource={candidateLawyers.map((l, index) => ({
                   ...l,
                   key: l.id,
+                  rank: index + 1,
                   specialtyNames: l.specialties.map(getCaseTypeName).join('、'),
                 }))}
                 size="small"
@@ -561,12 +575,48 @@ export default function ConflictPage() {
                   onChange: (keys) => setNewLawyerId(keys[0]),
                 }}
                 columns={[
+                  {
+                    title: '排名',
+                    dataIndex: 'rank',
+                    key: 'rank',
+                    width: 60,
+                    render: (r) => (
+                      <Tag color={r === 1 ? 'red' : r === 2 ? 'orange' : 'green'}>
+                        {r}
+                      </Tag>
+                    ),
+                  },
                   { title: '律师姓名', dataIndex: 'name', key: 'name' },
                   { title: '专业方向', dataIndex: 'specialtyNames', key: 'specialties' },
+                  {
+                    title: '剩余名额',
+                    dataIndex: 'remaining',
+                    key: 'remaining',
+                    width: 90,
+                    render: (r) => <Tag color="green">{r} 个</Tag>,
+                  },
+                  {
+                    title: '综合评分',
+                    dataIndex: 'score',
+                    key: 'score',
+                    width: 90,
+                    render: (s) => (
+                      <Tag color="blue" style={{ fontWeight: 'bold' }}>
+                        {s} 分
+                      </Tag>
+                    ),
+                  },
+                  {
+                    title: '推荐理由',
+                    dataIndex: 'reason',
+                    key: 'reason',
+                    ellipsis: true,
+                  },
                   {
                     title: '执业状态',
                     dataIndex: 'licenseStatus',
                     key: 'licenseStatus',
+                    width: 80,
                     render: (s) =>
                       s === 'active' ? (
                         <Tag color="success">有效</Tag>

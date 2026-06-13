@@ -30,6 +30,9 @@ import {
   nextId,
   TIME_SLOTS,
   LAWYERS,
+  getEmergencyImpact,
+  URGENCY_LEVELS,
+  getLawyerName,
 } from '../store/dataStore';
 
 const LICENSE_MAP = { active: '正常执业', suspended: '暂停执业' };
@@ -52,6 +55,10 @@ export default function SchedulePage() {
   const [filterLawyer, setFilterLawyer] = useState(null);
   const [calendarDate, setCalendarDate] = useState(dayjs());
   const [leaveForm] = Form.useForm();
+  const [impactModalVisible, setImpactModalVisible] = useState(false);
+  const [impactLawyerId, setImpactLawyerId] = useState(null);
+  const [impactTimeSlot, setImpactTimeSlot] = useState(null);
+  const [emergencyImpact, setEmergencyImpact] = useState(null);
 
   const lawyerMap = useMemo(() => {
     const m = {};
@@ -171,6 +178,14 @@ export default function SchedulePage() {
   const handleCancelLeave = (id) => {
     removeLeave(id);
     message.success('已撤销请假');
+  };
+
+  const handleViewEmergencyImpact = (lawyerId, timeSlot) => {
+    const impact = getEmergencyImpact(selectedDate, timeSlot, lawyerId);
+    setImpactLawyerId(lawyerId);
+    setImpactTimeSlot(timeSlot);
+    setEmergencyImpact(impact);
+    setImpactModalVisible(true);
   };
 
   const leaveColumns = [
@@ -344,20 +359,30 @@ export default function SchedulePage() {
                   style={{ marginBottom: 16 }}
                 >
                   <Descriptions.Item label="排班时段">
-                    <Space wrap>
+                    <Space wrap direction="vertical" style={{ width: '100%' }}>
                       {sch.timeSlots.map((ts) => {
                         const booked = dayDetails.bookedMap[`${sch.lawyerId}-${ts.key}`] || 0;
                         const isLeave = leaveSlots.has(ts.key);
                         return (
-                          <Tag
-                            key={ts.key}
-                            color={isLeave ? 'red' : booked >= ts.capacity ? 'default' : 'blue'}
-                          >
-                            {ts.key}{' '}
-                            {isLeave
-                              ? '(请假)'
-                              : `${booked}/${ts.capacity}`}
-                          </Tag>
+                          <div key={ts.key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <Tag
+                              color={isLeave ? 'red' : booked >= ts.capacity ? 'default' : 'blue'}
+                            >
+                              {ts.key}{' '}
+                              {isLeave
+                                ? '(请假)'
+                                : `${booked}/${ts.capacity}`}
+                            </Tag>
+                            {!isLeave && (
+                              <Button
+                                type="link"
+                                size="small"
+                                onClick={() => handleViewEmergencyImpact(sch.lawyerId, ts.key)}
+                              >
+                                查看插队影响
+                              </Button>
+                            )}
+                          </div>
                         );
                       })}
                     </Space>
@@ -476,6 +501,139 @@ export default function SchedulePage() {
           pagination={{ pageSize: 5 }}
         />
       </Card>
+
+      <Modal
+        title="紧急援助插队影响分析"
+        open={impactModalVisible}
+        onCancel={() => setImpactModalVisible(false)}
+        footer={[
+          <Button key="close" onClick={() => setImpactModalVisible(false)}>
+            关闭
+          </Button>,
+        ]}
+        width={600}
+      >
+        {emergencyImpact && (
+          <>
+            <Descriptions bordered size="small" column={2} style={{ marginBottom: 16 }}>
+              <Descriptions.Item label="律师">
+                {getLawyerName(impactLawyerId)}
+              </Descriptions.Item>
+              <Descriptions.Item label="插队时段">
+                {impactTimeSlot}
+              </Descriptions.Item>
+              <Descriptions.Item label="受影响预约数">
+                <Tag color="orange" style={{ fontWeight: 'bold' }}>
+                  {emergencyImpact.affectedCount} 个
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="是否需顺延">
+                <Tag color={emergencyImpact.needsPostpone ? 'red' : 'green'}>
+                  {emergencyImpact.needsPostpone ? '是' : '否'}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="最后受影响时段" span={2}>
+                {emergencyImpact.lastAffectedSlot || '无'}
+              </Descriptions.Item>
+            </Descriptions>
+
+            {emergencyImpact.needsPostpone && (
+              <Alert
+                type="warning"
+                message="容量不足提示"
+                description={emergencyImpact.postponeReason}
+                showIcon
+                style={{ marginBottom: 16 }}
+              />
+            )}
+
+            {emergencyImpact.affectedAppointments.length > 0 ? (
+              <div>
+                <div style={{ fontWeight: 'bold', marginBottom: 8 }}>
+                  受影响预约列表：
+                </div>
+                <Table
+                  dataSource={emergencyImpact.affectedAppointments}
+                  rowKey="id"
+                  size="small"
+                  pagination={false}
+                  columns={[
+                    {
+                      title: '预约编号',
+                      dataIndex: 'id',
+                      key: 'id',
+                      width: 100,
+                    },
+                    {
+                      title: '群众姓名',
+                      dataIndex: 'citizenName',
+                      key: 'citizenName',
+                    },
+                    {
+                      title: '原时段',
+                      dataIndex: 'timeSlot',
+                      key: 'timeSlot',
+                      width: 100,
+                    },
+                    {
+                      title: '案件类型',
+                      dataIndex: 'caseType',
+                      key: 'caseType',
+                      render: (ct) => {
+                        const CASE_TYPES = [
+                          { id: 'civil', name: '民事' },
+                          { id: 'criminal', name: '刑事' },
+                          { id: 'administrative', name: '行政' },
+                          { id: 'labor', name: '劳动争议' },
+                          { id: 'family', name: '婚姻家庭' },
+                          { id: 'contract', name: '合同纠纷' },
+                          { id: 'traffic', name: '交通事故' },
+                        ];
+                        return CASE_TYPES.find((t) => t.id === ct)?.name || ct;
+                      },
+                    },
+                    {
+                      title: '紧急程度',
+                      dataIndex: 'urgency',
+                      key: 'urgency',
+                      width: 90,
+                      render: (u) => {
+                        const level = URGENCY_LEVELS.find((l) => l.id === u);
+                        return level ? <Tag color={level.color}>{level.name}</Tag> : '-';
+                      },
+                    },
+                    {
+                      title: '顺延至',
+                      dataIndex: 'postponedTo',
+                      key: 'postponedTo',
+                      width: 100,
+                      render: (p) => p || <Tag color="green">无需顺延</Tag>,
+                    },
+                  ]}
+                />
+              </div>
+            ) : (
+              <Alert
+                type="success"
+                message="无受影响预约"
+                description="该时段容量充足，紧急援助插队不会影响其他预约"
+                showIcon
+              />
+            )}
+
+            <div style={{ marginTop: 16, padding: 12, background: '#f5f5f5', borderRadius: 4 }}>
+              <div style={{ fontWeight: 'bold', marginBottom: 8 }}>
+                💡 插队处理建议
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 20 }}>
+                {emergencyImpact.suggestions.map((s, i) => (
+                  <li key={i}>{s}</li>
+                ))}
+              </ul>
+            </div>
+          </>
+        )}
+      </Modal>
     </div>
   );
 }

@@ -27,6 +27,8 @@ import {
   subscribe,
   checkInAppointment,
   markNoShow,
+  markLate,
+  getEmergencyImpact,
   createEmergencyAid,
   createAddSlotRequest,
   promoteWaitlist,
@@ -35,6 +37,7 @@ import {
   CASE_TYPES,
   MATERIALS,
   TIME_SLOTS,
+  URGENCY_LEVELS,
 } from '../store/dataStore';
 
 const STATUS_MAP = {
@@ -42,6 +45,7 @@ const STATUS_MAP = {
   pending_materials: { text: '待补正', color: 'gold' },
   checked_in: { text: '已签到', color: 'blue' },
   no_show: { text: '爽约', color: 'red' },
+  late: { text: '迟到', color: 'orange' },
   cancelled: { text: '已取消', color: 'default' },
   reallocated: { text: '已改派', color: 'purple' },
 };
@@ -65,6 +69,7 @@ export default function OnSitePage() {
   const [checkedMats, setCheckedMats] = useState([]);
   const [emergencyForm] = Form.useForm();
   const [addSlotForm] = Form.useForm();
+  const [emergencyImpact, setEmergencyImpact] = useState(null);
 
   const dateStr = filterDate ? filterDate.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
 
@@ -78,7 +83,8 @@ export default function OnSitePage() {
     const checkedIn = dayAppointments.filter((a) => a.status === 'checked_in').length;
     const pending = dayAppointments.filter((a) => a.status === 'confirmed' || a.status === 'pending_materials').length;
     const noShow = dayAppointments.filter((a) => a.status === 'no_show').length;
-    return { total, checkedIn, pending, noShow };
+    const late = dayAppointments.filter((a) => a.status === 'late').length;
+    return { total, checkedIn, pending, noShow, late };
   }, [dayAppointments]);
 
   const dayWaitlist = useMemo(
@@ -94,6 +100,11 @@ export default function OnSitePage() {
   const handleNoShow = (id) => {
     markNoShow(id);
     message.info('已标记为爽约');
+  };
+
+  const handleMarkLate = (id) => {
+    markLate(id, '现场工作人员');
+    message.info('已标记为迟到');
   };
 
   const openMaterialModal = (apt) => {
@@ -146,15 +157,34 @@ export default function OnSitePage() {
     createEmergencyAid({
       citizenName: values.citizenName,
       citizenIdCard: values.citizenIdCard,
+      citizenPhone: values.phone,
       lawyerId: values.lawyerId,
       date: values.date.format('YYYY-MM-DD'),
       timeSlot: values.timeSlot,
       caseType: values.caseType,
+      caseReason: values.caseReason,
+      opposingParty: values.opposingParty,
+      urgency: 'emergency',
       reason: values.reason,
       materials: [],
     });
     message.success('紧急法律援助已创建');
     emergencyForm.resetFields();
+    setEmergencyImpact(null);
+  };
+
+  const handleCheckEmergencyImpact = () => {
+    const values = emergencyForm.getFieldsValue();
+    if (!values.lawyerId || !values.date || !values.timeSlot) {
+      message.warning('请先选择律师、日期和时段');
+      return;
+    }
+    const impact = getEmergencyImpact(
+      values.date.format('YYYY-MM-DD'),
+      values.timeSlot,
+      values.lawyerId
+    );
+    setEmergencyImpact(impact);
   };
 
   const handleAddSlotSubmit = (values) => {
@@ -203,6 +233,16 @@ export default function OnSitePage() {
       render: (ct) => CASE_TYPES.find((c) => c.id === ct)?.name || ct,
     },
     {
+      title: '紧急程度',
+      dataIndex: 'urgency',
+      key: 'urgency',
+      width: 90,
+      render: (u) => {
+        const level = URGENCY_LEVELS.find((l) => l.id === u);
+        return level ? <Tag color={level.color}>{level.name}</Tag> : '-';
+      },
+    },
+    {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
@@ -215,9 +255,9 @@ export default function OnSitePage() {
     {
       title: '操作',
       key: 'action',
-      width: 200,
+      width: 240,
       render: (_, record) => {
-        if (record.status === 'confirmed') {
+        if (record.status === 'confirmed' || record.status === 'late') {
           return (
             <Space size="small">
               <Popconfirm
@@ -228,6 +268,16 @@ export default function OnSitePage() {
               >
                 <Button type="primary" size="small">签到</Button>
               </Popconfirm>
+              {record.status !== 'late' && (
+                <Popconfirm
+                  title="确认标记为迟到？"
+                  onConfirm={() => handleMarkLate(record.id)}
+                  okText="确认"
+                  cancelText="取消"
+                >
+                  <Button size="small">迟到</Button>
+                </Popconfirm>
+              )}
               <Popconfirm
                 title="确认标记为爽约？"
                 onConfirm={() => handleNoShow(record.id)}
@@ -347,12 +397,12 @@ export default function OnSitePage() {
       children: (
         <>
           <Row gutter={16} style={{ marginBottom: 16 }}>
-            <Col span={6}>
+            <Col span={4}>
               <Card size="small">
                 <Statistic title="今日预约数" value={stats.total} />
               </Card>
             </Col>
-            <Col span={6}>
+            <Col span={4}>
               <Card size="small">
                 <Statistic
                   title="已签到"
@@ -361,7 +411,7 @@ export default function OnSitePage() {
                 />
               </Card>
             </Col>
-            <Col span={6}>
+            <Col span={4}>
               <Card size="small">
                 <Statistic
                   title="待签到"
@@ -370,12 +420,30 @@ export default function OnSitePage() {
                 />
               </Card>
             </Col>
-            <Col span={6}>
+            <Col span={4}>
+              <Card size="small">
+                <Statistic
+                  title="迟到"
+                  value={stats.late}
+                  valueStyle={{ color: '#fa8c16' }}
+                />
+              </Card>
+            </Col>
+            <Col span={4}>
               <Card size="small">
                 <Statistic
                   title="爽约"
                   value={stats.noShow}
                   valueStyle={{ color: '#ff4d4f' }}
+                />
+              </Card>
+            </Col>
+            <Col span={4}>
+              <Card size="small">
+                <Statistic
+                  title="候补数"
+                  value={dayWaitlist.filter((w) => w.status === 'waiting').length}
+                  valueStyle={{ color: '#722ed1' }}
                 />
               </Card>
             </Col>
@@ -440,7 +508,7 @@ export default function OnSitePage() {
         <>
           <Alert
             type="warning"
-            message="紧急法律援助将直接创建已确认的预约，无需审批"
+            message="紧急法律援助将直接创建已确认的预约，无需审批；特急案件可插队处理"
             showIcon
             style={{ marginBottom: 16 }}
           />
@@ -449,7 +517,7 @@ export default function OnSitePage() {
               form={emergencyForm}
               layout="vertical"
               onFinish={handleEmergencySubmit}
-              initialValues={{ timeSlot: TIME_SLOTS[0]?.key }}
+              initialValues={{ timeSlot: TIME_SLOTS[0]?.key, urgency: 'emergency' }}
             >
               <Row gutter={16}>
                 <Col span={12}>
@@ -498,6 +566,37 @@ export default function OnSitePage() {
                 </Col>
               </Row>
               <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item
+                    name="opposingParty"
+                    label="对方当事人"
+                  >
+                    <Input placeholder="请输入对方当事人姓名" maxLength={50} />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    name="urgency"
+                    label="紧急程度"
+                    rules={[{ required: true, message: '请选择紧急程度' }]}
+                  >
+                    <Select placeholder="请选择紧急程度">
+                      {URGENCY_LEVELS.map((level) => (
+                        <Select.Option key={level.id} value={level.id}>
+                          <Tag color={level.color}>{level.name}</Tag> - {level.description}
+                        </Select.Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Form.Item
+                name="caseReason"
+                label="案由"
+              >
+                <Input.TextArea rows={2} placeholder="请简要描述案件事由" maxLength={200} showCount />
+              </Form.Item>
+              <Row gutter={16}>
                 <Col span={8}>
                   <Form.Item
                     name="lawyerId"
@@ -538,6 +637,28 @@ export default function OnSitePage() {
                   </Form.Item>
                 </Col>
               </Row>
+              <Form.Item>
+                <Button onClick={handleCheckEmergencyImpact} style={{ marginRight: 8 }}>
+                  查看插队影响
+                </Button>
+              </Form.Item>
+              {emergencyImpact && (
+                <Alert
+                  type={emergencyImpact.affectedCount > 0 ? 'warning' : 'success'}
+                  showIcon
+                  message={
+                    emergencyImpact.affectedCount > 0
+                      ? `将影响 ${emergencyImpact.affectedCount} 个后续预约`
+                      : '对后续预约无影响'
+                  }
+                  description={
+                    emergencyImpact.affectedCount > 0
+                      ? `受影响预约：${emergencyImpact.affectedAppointments?.map((a) => a.citizenName).join('、')}。建议：${emergencyImpact.suggestion || '请与受影响群众沟通顺延安排'}`
+                      : '该时段当前无其他预约，可直接安排'
+                  }
+                  style={{ marginBottom: 16 }}
+                />
+              )}
               <Form.Item
                 name="reason"
                 label="紧急原因"
