@@ -28,6 +28,34 @@ const REPRESENTED_UNITS = [
   { id: 'U008', name: '和平街道办事处', type: '社区' },
 ];
 
+const APPOINTMENT_STATUS = {
+  CONFIRMED: 'confirmed',
+  PENDING_MATERIALS: 'pending_materials',
+  CHECKED_IN: 'checked_in',
+  CANCELLED: 'cancelled',
+  POSTPONED: 'postponed',
+  PENDING_CONFIRM: 'pending_confirm',
+  AFFECTED: 'affected',
+  REALLOCATED: 'reallocated',
+  LATE: 'late',
+  NO_SHOW: 'no_show',
+  COMPLETED: 'completed',
+};
+
+const APPOINTMENT_STATUS_TEXT = {
+  confirmed: { text: '已确认', color: 'green' },
+  pending_materials: { text: '待补正', color: 'gold' },
+  checked_in: { text: '已签到', color: 'blue' },
+  cancelled: { text: '已取消', color: 'default' },
+  postponed: { text: '已顺延', color: 'orange' },
+  pending_confirm: { text: '待确认', color: 'purple' },
+  affected: { text: '受影响', color: 'red' },
+  reallocated: { text: '已改派', color: 'cyan' },
+  late: { text: '迟到', color: 'orange' },
+  no_show: { text: '爽约', color: 'red' },
+  completed: { text: '已完成', color: 'green' },
+};
+
 const CASE_TYPES = [
   { id: 'civil', name: '民事纠纷', requiredMaterialIds: ['id_card', 'evidence', 'claim'] },
   { id: 'criminal', name: '刑事案件', requiredMaterialIds: ['id_card', 'case_notice', 'evidence'] },
@@ -108,6 +136,25 @@ function generateSeedData() {
     });
   }
 
+  const specialDates = ['2026-06-16'];
+  specialDates.forEach((date) => {
+    LAWYERS.forEach((lawyer) => {
+      if (lawyer.licenseStatus !== 'active') return;
+      if (schedules.some((s) => s.date === date && s.lawyerId === lawyer.id)) return;
+      const slots = TIME_SLOTS.map((ts) => ({
+        ...ts,
+        capacity: 2,
+        booked: 0,
+      }));
+      schedules.push({
+        id: `SCH-${date}-${lawyer.id}`,
+        lawyerId: lawyer.id,
+        date,
+        timeSlots: slots,
+      });
+    });
+  });
+
   const wd1 = getNextWeekday(today, 0);
   const wd2 = getNextWeekday(today, 1);
 
@@ -157,6 +204,10 @@ function generateSeedData() {
       createdAt: dayjs().subtract(1, 'day').format('YYYY-MM-DD HH:mm:ss'),
       isEmergency: false,
       invalidReason: '',
+      originalTimeSlot: '',
+      adjustedTimeSlot: '',
+      impactReason: '',
+      affectedByEmergencyId: '',
     },
     {
       id: 'APT-002',
@@ -176,6 +227,10 @@ function generateSeedData() {
       createdAt: dayjs().subtract(12, 'hour').format('YYYY-MM-DD HH:mm:ss'),
       isEmergency: false,
       invalidReason: '',
+      originalTimeSlot: '',
+      adjustedTimeSlot: '',
+      impactReason: '',
+      affectedByEmergencyId: '',
     },
     {
       id: 'APT-003',
@@ -195,6 +250,10 @@ function generateSeedData() {
       createdAt: dayjs().subtract(6, 'hour').format('YYYY-MM-DD HH:mm:ss'),
       isEmergency: false,
       invalidReason: '',
+      originalTimeSlot: '',
+      adjustedTimeSlot: '',
+      impactReason: '',
+      affectedByEmergencyId: '',
     },
     {
       id: 'APT-004',
@@ -214,6 +273,125 @@ function generateSeedData() {
       createdAt: dayjs().subtract(3, 'hour').format('YYYY-MM-DD HH:mm:ss'),
       isEmergency: false,
       invalidReason: '',
+      originalTimeSlot: '',
+      adjustedTimeSlot: '',
+      impactReason: '',
+      affectedByEmergencyId: '',
+    },
+    {
+      id: 'APT-005',
+      citizenName: '陈强',
+      citizenIdCard: '110101199203033456',
+      citizenPhone: '13900001003',
+      lawyerId: 'L003',
+      date: '2026-06-16',
+      timeSlot: '09:00-10:00',
+      caseType: 'criminal',
+      caseReason: '盗窃案辩护咨询',
+      opposingParty: '市检察院',
+      opposingPartyUnit: '',
+      materials: ['id_card', 'case_notice', 'evidence'],
+      urgency: 'normal',
+      status: 'confirmed',
+      createdAt: dayjs().subtract(2, 'day').format('YYYY-MM-DD HH:mm:ss'),
+      isEmergency: false,
+      invalidReason: '',
+      originalTimeSlot: '',
+      adjustedTimeSlot: '',
+      impactReason: '',
+      affectedByEmergencyId: '',
+    },
+    {
+      id: 'APT-006',
+      citizenName: '李明',
+      citizenIdCard: '110101198707074567',
+      citizenPhone: '13900001006',
+      lawyerId: 'L003',
+      date: '2026-06-16',
+      timeSlot: '10:00-11:00',
+      caseType: 'admin',
+      caseReason: '行政复议咨询，对行政处罚不服',
+      opposingParty: '市工商局',
+      opposingPartyUnit: '',
+      materials: ['id_card', 'admin_decision', 'evidence'],
+      urgency: 'normal',
+      status: 'confirmed',
+      createdAt: dayjs().subtract(2, 'day').format('YYYY-MM-DD HH:mm:ss'),
+      isEmergency: false,
+      invalidReason: '',
+      originalTimeSlot: '',
+      adjustedTimeSlot: '',
+      impactReason: '',
+      affectedByEmergencyId: '',
+    },
+    {
+      id: 'APT-007',
+      citizenName: '王芳',
+      citizenIdCard: '110101199509095678',
+      citizenPhone: '13900001007',
+      lawyerId: 'L003',
+      date: '2026-06-16',
+      timeSlot: '11:00-12:00',
+      caseType: 'criminal',
+      caseReason: '取保候审相关法律咨询',
+      opposingParty: '市公安局',
+      opposingPartyUnit: '',
+      materials: ['id_card', 'case_notice'],
+      urgency: 'urgent',
+      status: 'confirmed',
+      createdAt: dayjs().subtract(1, 'day').format('YYYY-MM-DD HH:mm:ss'),
+      isEmergency: false,
+      invalidReason: '',
+      originalTimeSlot: '',
+      adjustedTimeSlot: '',
+      impactReason: '',
+      affectedByEmergencyId: '',
+    },
+    {
+      id: 'APT-008',
+      citizenName: '张伟',
+      citizenIdCard: '110101198202026789',
+      citizenPhone: '13900001008',
+      lawyerId: 'L003',
+      date: '2026-06-16',
+      timeSlot: '14:00-15:00',
+      caseType: 'criminal',
+      caseReason: '故意伤害罪辩护准备',
+      opposingParty: '受害人刘强',
+      opposingPartyUnit: '',
+      materials: ['id_card', 'evidence'],
+      urgency: 'normal',
+      status: 'confirmed',
+      createdAt: dayjs().subtract(1, 'day').format('YYYY-MM-DD HH:mm:ss'),
+      isEmergency: false,
+      invalidReason: '',
+      originalTimeSlot: '',
+      adjustedTimeSlot: '',
+      impactReason: '',
+      affectedByEmergencyId: '',
+    },
+    {
+      id: 'APT-009',
+      citizenName: '刘洋',
+      citizenIdCard: '110101199111117890',
+      citizenPhone: '13900001009',
+      lawyerId: 'L003',
+      date: '2026-06-16',
+      timeSlot: '15:00-16:00',
+      caseType: 'admin',
+      caseReason: '国家赔偿申请咨询',
+      opposingParty: '市公安局',
+      opposingPartyUnit: '',
+      materials: ['id_card', 'admin_decision', 'evidence'],
+      urgency: 'urgent',
+      status: 'confirmed',
+      createdAt: dayjs().subtract(12, 'hour').format('YYYY-MM-DD HH:mm:ss'),
+      isEmergency: false,
+      invalidReason: '',
+      originalTimeSlot: '',
+      adjustedTimeSlot: '',
+      impactReason: '',
+      affectedByEmergencyId: '',
     },
   ];
 
@@ -335,14 +513,18 @@ export function nextId(prefix) {
   return `${prefix.toUpperCase().padEnd(3, '0').slice(0, 3)}-${String(counter + 1).padStart(3, '0')}`;
 }
 
-export function addAuditLog(action, operator, details) {
-  data.auditLogs.push({
+export function addAuditLog(action, operator, details, extraData) {
+  const log = {
     id: nextId('log'),
     timestamp: dayjs().format('YYYY-MM-DD HH:mm:ss'),
     action,
     operator,
     details,
-  });
+  };
+  if (extraData !== undefined) {
+    log.extraData = typeof extraData === 'string' ? extraData : JSON.stringify(extraData);
+  }
+  data.auditLogs.push(log);
 }
 
 export function resetData() {
@@ -845,24 +1027,104 @@ export function markLate(id, operator = '现场人员') {
 
 export function getEmergencyImpact(date, timeSlot, lawyerId) {
   const dayAppointments = data.appointments.filter(
-    (a) => a.date === date && a.lawyerId === lawyerId && a.status !== 'cancelled'
+    (a) => a.date === date && a.lawyerId === lawyerId && a.status !== 'cancelled' && a.status !== 'postponed'
   );
 
   const slotIndex = TIME_SLOTS.findIndex((ts) => ts.key === timeSlot);
-  if (slotIndex === -1) return { affectedCount: 0, affectedAppointments: [], delaySlots: 0 };
+  if (slotIndex === -1) {
+    return {
+      affectedCount: 0,
+      affectedAppointments: [],
+      needsPostpone: false,
+      lastAffectedSlot: null,
+      postponeReason: '',
+      suggestions: ['当前时段无效'],
+    };
+  }
 
   const subsequentSlots = TIME_SLOTS.slice(slotIndex + 1);
-  const affectedAppointments = dayAppointments.filter(
-    (a) => subsequentSlots.some((ts) => ts.key === a.timeSlot)
-  );
+  const affectedAppointments = dayAppointments
+    .filter((a) => subsequentSlots.some((ts) => ts.key === a.timeSlot))
+    .sort((a, b) => {
+      const idxA = TIME_SLOTS.findIndex((ts) => ts.key === a.timeSlot);
+      const idxB = TIME_SLOTS.findIndex((ts) => ts.key === b.timeSlot);
+      return idxA - idxB;
+    });
+
+  const daySchedule = data.schedules.find((s) => s.date === date && s.lawyerId === lawyerId);
+  const capacityMap = {};
+  if (daySchedule) {
+    daySchedule.timeSlots.forEach((ts) => {
+      capacityMap[ts.key] = ts.capacity;
+    });
+  }
+
+  const slotBookedMap = {};
+  dayAppointments.forEach((a) => {
+    if (!slotBookedMap[a.timeSlot]) slotBookedMap[a.timeSlot] = 0;
+    slotBookedMap[a.timeSlot]++;
+  });
+
+  const currentSlotBooked = slotBookedMap[timeSlot] || 0;
+  const currentSlotCapacity = capacityMap[timeSlot] || 2;
+  const needsPostpone = currentSlotBooked >= currentSlotCapacity;
+
+  const affectedWithPostpone = affectedAppointments.map((apt, idx) => {
+    let postponedTo = '';
+    if (needsPostpone) {
+      let nextSlotIdx = slotIndex + idx + 1;
+      for (let i = nextSlotIdx; i < TIME_SLOTS.length; i++) {
+        const slotKey = TIME_SLOTS[i].key;
+        const booked = slotBookedMap[slotKey] || 0;
+        const cap = capacityMap[slotKey] || 2;
+        if (booked < cap) {
+          postponedTo = slotKey;
+          slotBookedMap[slotKey] = booked + 1;
+          break;
+        }
+      }
+    }
+    return {
+      ...apt,
+      postponedTo,
+    };
+  });
+
+  const suggestions = [];
+  if (affectedAppointments.length === 0) {
+    suggestions.push('该时段容量充足，紧急援助插队不会影响其他预约');
+  } else {
+    suggestions.push(`紧急援助插入 ${timeSlot} 时段后，将影响后续 ${affectedAppointments.length} 个预约`);
+    if (needsPostpone) {
+      suggestions.push(`当前 ${timeSlot} 时段已预约 ${currentSlotBooked}/${currentSlotCapacity}，需将受影响预约顺延至后续时段`);
+      const unpostponable = affectedWithPostpone.filter((a) => !a.postponedTo);
+      if (unpostponable.length > 0) {
+        suggestions.push(`有 ${unpostponable.length} 个预约无法在当日顺延，建议改派至其他律师或改日`);
+      }
+    } else {
+      suggestions.push(`当前 ${timeSlot} 时段仍有余量（${currentSlotBooked}/${currentSlotCapacity}），可直接插入无需顺延`);
+    }
+    suggestions.push('建议提前通过短信或电话通知受影响群众');
+  }
+
+  let lastAffectedSlot = null;
+  if (affectedAppointments.length > 0) {
+    const lastApt = affectedAppointments[affectedAppointments.length - 1];
+    lastAffectedSlot = lastApt.timeSlot;
+  }
 
   return {
     affectedCount: affectedAppointments.length,
-    affectedAppointments,
-    delaySlots: subsequentSlots.length,
-    suggestion: affectedAppointments.length > 0
-      ? `紧急援助插入 ${timeSlot} 时段后，将影响后续 ${affectedAppointments.length} 个预约，可能导致顺延`
-      : '紧急援助插入后，后续时段无预约，无顺延影响',
+    affectedAppointments: affectedWithPostpone,
+    needsPostpone,
+    lastAffectedSlot,
+    postponeReason: needsPostpone
+      ? `${timeSlot} 时段已满（${currentSlotBooked}/${currentSlotCapacity}），插入紧急援助需顺延后续 ${affectedAppointments.length} 个预约`
+      : '',
+    suggestions,
+    currentSlotBooked,
+    currentSlotCapacity,
+    slotIndex,
   };
 }
 
@@ -896,6 +1158,10 @@ export function createAppointment(booking, operator = '群众') {
     isEmergency: booking.isEmergency || false,
     conflictWarnings: conflicts,
     invalidReason: '',
+    originalTimeSlot: '',
+    adjustedTimeSlot: '',
+    impactReason: '',
+    affectedByEmergencyId: '',
   };
 
   data.appointments.push(apt);
@@ -1085,7 +1351,7 @@ export function rejectAddSlot(id, operator = '值班主管') {
   return true;
 }
 
-export function createEmergencyAid(aid) {
+export function createEmergencyAid(aid, operator = '现场人员') {
   const req = {
     id: nextId('addSlot'),
     lawyerId: aid.lawyerId,
@@ -1098,24 +1364,124 @@ export function createEmergencyAid(aid) {
   };
   data.addSlotRequests.push(req);
 
+  const impact = getEmergencyImpact(aid.date, aid.timeSlot || '09:00-10:00', aid.lawyerId);
+
   const apt = {
     id: nextId('appointment'),
     citizenName: aid.citizenName,
     citizenIdCard: aid.citizenIdCard,
+    citizenPhone: aid.citizenPhone || '',
     lawyerId: aid.lawyerId,
     date: aid.date,
     timeSlot: aid.timeSlot || '09:00-10:00',
     caseType: aid.caseType,
+    caseReason: aid.caseReason || aid.reason || '',
+    opposingParty: aid.opposingParty || '',
+    opposingPartyUnit: aid.opposingPartyUnit || '',
     materials: aid.materials || [],
+    urgency: 'emergency',
     status: 'confirmed',
     createdAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
     isEmergency: true,
+    conflictWarnings: [],
+    invalidReason: '',
+    originalTimeSlot: '',
+    adjustedTimeSlot: '',
+    impactReason: '',
+    affectedByEmergencyId: '',
   };
   data.appointments.push(apt);
 
-  addAuditLog('紧急法律援助', '现场人员', `${aid.citizenName} 紧急援助，指派律师 ${aid.lawyerId}`);
+  const affectedDetails = [];
+  if (impact.needsPostpone && impact.affectedAppointments.length > 0) {
+    impact.affectedAppointments.forEach((affectedApt) => {
+      const realApt = data.appointments.find((a) => a.id === affectedApt.id);
+      if (!realApt) return;
+
+      realApt.originalTimeSlot = realApt.timeSlot;
+
+      if (affectedApt.postponedTo) {
+        realApt.adjustedTimeSlot = affectedApt.postponedTo;
+        realApt.status = APPOINTMENT_STATUS.POSTPONED;
+        realApt.impactReason = `紧急援助插队（${apt.id} ${apt.citizenName}），原时段 ${realApt.originalTimeSlot} 顺延至 ${realApt.adjustedTimeSlot}`;
+        affectedDetails.push({
+          id: realApt.id,
+          citizenName: realApt.citizenName,
+          originalTimeSlot: realApt.originalTimeSlot,
+          adjustedTimeSlot: realApt.adjustedTimeSlot,
+          status: 'postponed',
+          reason: `顺延至 ${realApt.adjustedTimeSlot}`,
+        });
+      } else {
+        realApt.adjustedTimeSlot = '';
+        realApt.status = APPOINTMENT_STATUS.AFFECTED;
+        realApt.impactReason = `紧急援助插队（${apt.id} ${apt.citizenName}），当日无法顺延，需改派或改日`;
+        affectedDetails.push({
+          id: realApt.id,
+          citizenName: realApt.citizenName,
+          originalTimeSlot: realApt.originalTimeSlot,
+          adjustedTimeSlot: '',
+          status: 'affected',
+          reason: '当日无可用顺延时段，需改派或改日',
+        });
+      }
+      realApt.affectedByEmergencyId = apt.id;
+    });
+  } else if (!impact.needsPostpone && impact.affectedAppointments.length > 0) {
+    impact.affectedAppointments.forEach((affectedApt) => {
+      const realApt = data.appointments.find((a) => a.id === affectedApt.id);
+      if (!realApt) return;
+      realApt.originalTimeSlot = realApt.timeSlot;
+      realApt.adjustedTimeSlot = realApt.timeSlot;
+      realApt.status = APPOINTMENT_STATUS.PENDING_CONFIRM;
+      realApt.impactReason = `紧急援助插队（${apt.id} ${apt.citizenName}），同属后续时段，建议确认是否到诊`;
+      realApt.affectedByEmergencyId = apt.id;
+      affectedDetails.push({
+        id: realApt.id,
+        citizenName: realApt.citizenName,
+        originalTimeSlot: realApt.timeSlot,
+        adjustedTimeSlot: realApt.timeSlot,
+        status: 'pending_confirm',
+        reason: '同属后续时段，建议确认是否到诊',
+      });
+    });
+  }
+
+  let auditDetail = `${aid.citizenName} 紧急援助，指派律师 ${getLawyerName(aid.lawyerId)}（${aid.lawyerId}），时段: ${apt.timeSlot}`;
+  if (affectedDetails.length > 0) {
+    auditDetail += `，影响 ${affectedDetails.length} 个预约: `;
+    auditDetail += affectedDetails
+      .map((d) => `${d.citizenName}(${d.id}) ${d.originalTimeSlot}→${d.adjustedTimeSlot || '无'}[${APPOINTMENT_STATUS_TEXT[d.status]?.text || d.status}]`)
+      .join('; ');
+  }
+
+  addAuditLog('紧急法律援助插队', operator, auditDetail);
+
+  if (affectedDetails.length > 0) {
+    addAuditLog(
+      '排班顺延处理',
+      operator,
+      `紧急援助 ${apt.id} 触发顺延，共处理 ${affectedDetails.length} 个预约: ${impact.postponeReason || '后续时段标记待确认'}`,
+      JSON.stringify({
+        emergencyId: apt.id,
+        emergencyCitizen: apt.citizenName,
+        date: apt.date,
+        timeSlot: apt.timeSlot,
+        affectedList: affectedDetails,
+      })
+    );
+  }
+
   notify();
-  return apt;
+  return {
+    success: true,
+    appointment: apt,
+    impact: {
+      ...impact,
+      processedCount: affectedDetails.length,
+      affectedDetails,
+    },
+  };
 }
 
 export function updateAppointmentMaterials(id, materials, operator = '现场人员') {
@@ -1260,5 +1626,7 @@ export {
   RECUSAL_RELATIONS,
   URGENCY_LEVELS,
   REPRESENTED_UNITS,
+  APPOINTMENT_STATUS,
+  APPOINTMENT_STATUS_TEXT,
   getLawyerName,
 };

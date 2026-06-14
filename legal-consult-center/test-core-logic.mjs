@@ -15,6 +15,7 @@ const {
   checkInAppointment, markNoShow, addWaitlistEntry, promoteWaitlist,
   reallocateAppointment, createEmergencyAid, approveAddSlot,
   createAddSlotRequest, addLeave, getConflictMatrix, getRuleExplanation,
+  getEmergencyImpact, APPOINTMENT_STATUS,
 } = mod;
 
 function logPass(name, detail) {
@@ -376,8 +377,9 @@ test('创建紧急法律援助 - 应直接生成已确认预约', () => {
     caseType: 'criminal',
     reason: '重大紧急案件需立即处理',
   });
-  assertEquals('confirmed', result?.status, '紧急援助预约应为已确认状态');
-  return assertTrue(result?.isEmergency === true, '紧急援助应标记 isEmergency');
+  assertTrue(result?.success === true, '紧急援助应返回 success=true');
+  assertEquals('confirmed', result?.appointment?.status, '紧急援助预约应为已确认状态');
+  return assertTrue(result?.appointment?.isEmergency === true, '紧急援助应标记 isEmergency');
 });
 
 console.log('\n--- 12. 加号审批 测试 ---');
@@ -419,15 +421,15 @@ test('冲突矩阵 - 明天有在班律师应生成矩阵', () => {
 });
 
 console.log('\n--- 14. 规则解释 测试 ---');
-test('规则解释 - 应返回7条规则', () => {
+test('规则解释 - 应返回15条规则', () => {
   const rules = getRuleExplanation();
-  return assertEquals(7, rules.length, '应有7条规则说明');
+  return assertEquals(15, rules.length, '应有15条规则说明');
 });
 
-test('规则解释 - 应包含请假/专业/冲突/上限/容量/材料', () => {
+test('规则解释 - 应包含核心规则', () => {
   const rules = getRuleExplanation();
   const names = rules.map(r => r.rule);
-  const required = ['律师请假', '专业匹配', '同案利益冲突', '回避关系', '群众当日预约上限', '时段容量', '材料齐全'];
+  const required = ['律师请假', '专业匹配', '同案利益冲突', '回避关系', '群众当日预约上限', '时段容量', '材料齐全', '紧急援助插队', '智能改派建议', '现场秩序管理', '审计留痕'];
   const allPresent = required.every(n => names.includes(n));
   return assertTrue(allPresent, `应包含所有核心规则: ${names.join(',')}`);
 });
@@ -496,6 +498,208 @@ test('快照创建与恢复', () => {
   mod.restoreSnapshot(snap.id);
   const hasLeaveBefore = getData().leaves.some(l => l.id === 'TEST-LEAVE-SNAP');
   return assertFalse(hasLeaveBefore, '恢复快照后不应有测试请假');
+});
+
+console.log('\n--- 17. 紧急援助插队影响落地 - 王刚2026-06-16案例 ---');
+resetData();
+
+const TEST_DATE = '2026-06-16';
+const LAWYER_WANGGANG = 'L003';
+
+test('王刚(L003) 2026-06-16 预约数据存在', () => {
+  const apts = getData().appointments.filter(
+    a => a.date === TEST_DATE && a.lawyerId === LAWYER_WANGGANG && a.status !== 'cancelled'
+  );
+  logPass(`2026-06-16 王刚已有 ${apts.length} 个预约: ${apts.map(a => a.citizenName + '@' + a.timeSlot).join(', ')}`);
+  return assertTrue(apts.length >= 5, `2026-06-16 王刚应有至少5个预约(陈强等), 实际${apts.length}个`);
+});
+
+test('插队前09:00-10:00陈强预约状态应为已确认', () => {
+  const chenqiang = getData().appointments.find(
+    a => a.date === TEST_DATE && a.lawyerId === LAWYER_WANGGANG && 
+         a.timeSlot === '09:00-10:00' && a.citizenName === '陈强'
+  );
+  if (!chenqiang) {
+    logFail('未找到陈强09:00预约');
+    return false;
+  }
+  return assertEquals('confirmed', chenqiang.status, '插队前陈强预约状态应为confirmed');
+});
+
+test('getEmergencyImpact 计算受影响预约', () => {
+  const impact = getEmergencyImpact(TEST_DATE, '09:00-10:00', LAWYER_WANGGANG);
+  assertTrue(impact.needsPostpone !== undefined, '应返回 needsPostpone 标记');
+  assertTrue(Array.isArray(impact.affectedAppointments), '受影响预约应是数组');
+  if (impact.affectedAppointments.length > 0) {
+    const hasPostponeTo = impact.affectedAppointments.some(a => a.postponedTo);
+    logPass(`受影响预约数: ${impact.affectedAppointments.length}, 含顺延时段: ${hasPostponeTo}`);
+  }
+  return assertTrue(impact.affectedAppointments.length >= 1, '应计算出至少1个受影响预约');
+});
+
+test('插入紧急援助后陈强等预约状态变更', () => {
+  const result = createEmergencyAid({
+    citizenName: '紧急援助测试群众',
+    citizenIdCard: '110101198001018888',
+    citizenPhone: '13900009999',
+    lawyerId: LAWYER_WANGGANG,
+    date: TEST_DATE,
+    timeSlot: '09:00-10:00',
+    caseType: 'criminal',
+    reason: '紧急刑事案件需立即援助',
+    opposingParty: '对方当事人',
+  }, '测试操作员');
+
+  assertTrue(result?.success === true, '紧急援助创建应返回success=true');
+  assertTrue(result?.appointment?.isEmergency === true, '新预约应标记为紧急');
+  assertEquals('confirmed', result?.appointment?.status, '紧急援助预约应为已确认');
+  
+  const impact = result?.impact;
+  assertTrue(impact?.processedCount >= 1, `应处理至少1个受影响预约, 实际${impact?.processedCount}个`);
+  assertTrue(Array.isArray(impact?.affectedDetails), '应返回详细处理列表');
+  
+  logPass(`处理结果: 顺延${impact?.affectedDetails?.filter(d=>d.status==='postponed').length || 0}个, ` +
+          `待确认${impact?.affectedDetails?.filter(d=>d.status==='pending_confirm').length || 0}个, ` +
+          `受影响${impact?.affectedDetails?.filter(d=>d.status==='affected').length || 0}个`);
+  
+  return true;
+});
+
+test('受影响预约写入数据存储 - 顺延/待确认/受影响状态', () => {
+  const allApts = getData().appointments.filter(
+    a => a.date === TEST_DATE && a.lawyerId === LAWYER_WANGGANG
+  );
+  
+  const affectedApts = allApts.filter(a => 
+    a.status === APPOINTMENT_STATUS.POSTPONED || 
+    a.status === APPOINTMENT_STATUS.PENDING_CONFIRM || 
+    a.status === APPOINTMENT_STATUS.AFFECTED
+  );
+  
+  logPass(`受影响预约数: ${affectedApts.length}`);
+  affectedApts.forEach(a => {
+    const statusText = a.status === 'postponed' ? '已顺延' : 
+                      a.status === 'pending_confirm' ? '待确认' : '受影响';
+    logPass(`  ${a.citizenName} ${a.originalTimeSlot || a.timeSlot} -> ${a.adjustedTimeSlot || '(无)'} [${statusText}]`);
+    logPass(`    原因: ${a.impactReason?.substring?.(0, 50) || '(无)'}`);
+  });
+  
+  return assertTrue(affectedApts.length >= 1, `至少1个预约状态被更新, 实际${affectedApts.length}个`);
+});
+
+test('顺延预约 - 原时段/调整后时段/影响原因字段完整', () => {
+  const postponed = getData().appointments.filter(
+    a => a.date === TEST_DATE && a.lawyerId === LAWYER_WANGGANG && 
+         a.status === APPOINTMENT_STATUS.POSTPONED
+  );
+  
+  if (postponed.length === 0) {
+    logPass('当日无顺延预约(可能全部标记为待确认)，跳过');
+    return true;
+  }
+  
+  let allOk = true;
+  postponed.forEach(apt => {
+    const hasOrig = !!apt.originalTimeSlot;
+    const hasAdj = !!apt.adjustedTimeSlot;
+    const hasReason = !!apt.impactReason;
+    const hasEmerId = !!apt.affectedByEmergencyId;
+    
+    if (!hasOrig || !hasAdj || !hasReason || !hasEmerId) {
+      logFail(`${apt.citizenName} 顺延字段不完整: orig=${hasOrig}, adj=${hasAdj}, reason=${hasReason}, emerId=${hasEmerId}`);
+      allOk = false;
+    } else {
+      assertTrue(apt.originalTimeSlot !== apt.adjustedTimeSlot, 
+        `${apt.citizenName} 原时段(${apt.originalTimeSlot})应与调整后(${apt.adjustedTimeSlot})不同`);
+    }
+  });
+  
+  return allOk;
+});
+
+test('待确认/受影响预约 - 字段完整', () => {
+  const pendingOrAffected = getData().appointments.filter(
+    a => a.date === TEST_DATE && a.lawyerId === LAWYER_WANGGANG && 
+         (a.status === APPOINTMENT_STATUS.PENDING_CONFIRM || a.status === APPOINTMENT_STATUS.AFFECTED)
+  );
+  
+  if (pendingOrAffected.length === 0) {
+    logPass('当日无待确认/受影响预约，跳过');
+    return true;
+  }
+  
+  let allOk = true;
+  pendingOrAffected.forEach(apt => {
+    const hasOrig = !!apt.originalTimeSlot;
+    const hasReason = !!apt.impactReason;
+    const hasEmerId = !!apt.affectedByEmergencyId;
+    
+    if (!hasOrig || !hasReason || !hasEmerId) {
+      logFail(`${apt.citizenName}(${apt.status}) 字段不完整: orig=${hasOrig}, reason=${hasReason}, emerId=${hasEmerId}`);
+      allOk = false;
+    }
+  });
+  
+  return allOk;
+});
+
+test('审计日志 - 紧急援助插队记录存在且含结构化数据', () => {
+  const audits = getData().auditLogs.filter(
+    log => log.action === '排班顺延处理' || log.action === '紧急法律援助插队'
+  );
+  
+  logPass(`紧急援助相关审计日志数: ${audits.length}`);
+  audits.forEach(log => {
+    logPass(`  [${log.action}] ${log.description || log.details}`.substring?.(0, 100));
+  });
+  
+  assertTrue(audits.length >= 1, `应至少有1条紧急援助相关审计日志, 实际${audits.length}条`);
+  
+  const shunyanLog = audits.find(l => l.action === '排班顺延处理');
+  if (shunyanLog) {
+    logPass(`排班顺延日志: ${(shunyanLog.description || shunyanLog.details)?.substring?.(0, 80)}`);
+    if (shunyanLog.extraData) {
+      try {
+        const extra = typeof shunyanLog.extraData === 'string' 
+          ? JSON.parse(shunyanLog.extraData) 
+          : shunyanLog.extraData;
+        assertTrue(Array.isArray(extra.affectedList), '结构化数据应包含 affectedList 数组');
+        assertTrue(!!extra.emergencyId, '结构化数据应包含 emergencyId');
+        assertTrue(!!extra.emergencyCitizen, '结构化数据应包含 emergencyCitizen');
+        logPass(`  affectedList 含 ${extra.affectedList?.length || 0} 条记录`);
+      } catch (e) {
+        logFail('结构化数据解析失败: ' + e.message);
+        return false;
+      }
+    } else {
+      logFail('排班顺延日志应包含 extraData 结构化数据');
+      return false;
+    }
+  }
+  
+  return true;
+});
+
+test('陈强预约 - 最终状态验证', () => {
+  const chenqiang = getData().appointments.find(
+    a => a.date === TEST_DATE && a.lawyerId === LAWYER_WANGGANG && 
+         a.citizenName === '陈强'
+  );
+  
+  if (!chenqiang) {
+    logFail('未找到陈强预约');
+    return false;
+  }
+  
+  logPass(`陈强最终状态: ${chenqiang.status}, 原时段: ${chenqiang.originalTimeSlot || '(未记录)'}, 调整后: ${chenqiang.adjustedTimeSlot || '(未记录)'}`);
+  
+  const inAffectedState = 
+    chenqiang.status === APPOINTMENT_STATUS.POSTPONED ||
+    chenqiang.status === APPOINTMENT_STATUS.PENDING_CONFIRM ||
+    chenqiang.status === APPOINTMENT_STATUS.AFFECTED;
+  
+  return assertTrue(inAffectedState, 
+    `陈强预约应在顺延/待确认/受影响状态之一, 实际为${chenqiang.status}`);
 });
 
 console.log('\n' + '='.repeat(50));

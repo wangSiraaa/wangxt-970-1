@@ -16,6 +16,8 @@ import {
   DatePicker,
   Checkbox,
   Input,
+  Alert,
+  Tooltip,
 } from 'antd';
 import dayjs from 'dayjs';
 import {
@@ -32,6 +34,8 @@ import {
   LAWYERS,
   getEmergencyImpact,
   URGENCY_LEVELS,
+  APPOINTMENT_STATUS,
+  APPOINTMENT_STATUS_TEXT,
   getLawyerName,
 } from '../store/dataStore';
 
@@ -140,7 +144,7 @@ export default function SchedulePage() {
   };
 
   const dayDetails = useMemo(() => {
-    if (!selectedDate) return { schedules: [], leaves: [] };
+    if (!selectedDate) return { schedules: [], leaves: [], appointments: [], affectedAppointments: [] };
     const daySchedules = scheduleMap[selectedDate] || [];
     const dayLeaves = data.leaves.filter(
       (l) => l.date === selectedDate && l.status === 'approved'
@@ -148,13 +152,20 @@ export default function SchedulePage() {
     const dayAppointments = data.appointments.filter(
       (a) => a.date === selectedDate && a.status !== 'cancelled'
     );
+    const affectedAppointments = data.appointments.filter(
+      (a) =>
+        a.date === selectedDate &&
+        (a.status === APPOINTMENT_STATUS.POSTPONED ||
+          a.status === APPOINTMENT_STATUS.PENDING_CONFIRM ||
+          a.status === APPOINTMENT_STATUS.AFFECTED)
+    );
     const bookedMap = {};
     dayAppointments.forEach((a) => {
       const key = `${a.lawyerId}-${a.timeSlot}`;
       if (!bookedMap[key]) bookedMap[key] = 0;
       bookedMap[key]++;
     });
-    return { schedules: daySchedules, leaves: dayLeaves, bookedMap };
+    return { schedules: daySchedules, leaves: dayLeaves, bookedMap, appointments: dayAppointments, affectedAppointments };
   }, [selectedDate, scheduleMap, data.leaves, data.appointments]);
 
   const handleAddLeave = () => {
@@ -413,6 +424,103 @@ export default function SchedulePage() {
                       {lawyerMap[l.lawyerId]?.name || l.lawyerId} — 时段: {l.timeSlots.join('、')} | 原因: {l.reason}
                     </div>
                   ))}
+              </div>
+            )}
+
+            {dayDetails.affectedAppointments.length > 0 && (
+              <div style={{ marginTop: 24 }}>
+                <div
+                  style={{
+                    fontWeight: 'bold',
+                    marginBottom: 12,
+                    fontSize: 15,
+                    paddingLeft: 8,
+                    borderLeft: '3px solid #faad14',
+                  }}
+                >
+                  ⚠️ 受紧急援助插队影响的预约（共 {dayDetails.affectedAppointments.length} 个）
+                </div>
+                <Table
+                  dataSource={dayDetails.affectedAppointments}
+                  rowKey="id"
+                  size="small"
+                  pagination={false}
+                  columns={[
+                    {
+                      title: '预约编号',
+                      dataIndex: 'id',
+                      key: 'id',
+                      width: 90,
+                    },
+                    {
+                      title: '群众',
+                      dataIndex: 'citizenName',
+                      key: 'citizenName',
+                      width: 70,
+                    },
+                    {
+                      title: '律师',
+                      dataIndex: 'lawyerId',
+                      key: 'lawyerId',
+                      width: 70,
+                      render: (id) => getLawyerName(id),
+                    },
+                    {
+                      title: '状态',
+                      dataIndex: 'status',
+                      key: 'status',
+                      width: 85,
+                      render: (s) => {
+                        const info = APPOINTMENT_STATUS_TEXT[s];
+                        return info ? (
+                          <Tag color={info.color} style={{ fontWeight: 'bold' }}>
+                            {info.text}
+                          </Tag>
+                        ) : (
+                          <Tag>{s}</Tag>
+                        );
+                      },
+                    },
+                    {
+                      title: '原时段',
+                      dataIndex: 'originalTimeSlot',
+                      key: 'originalTimeSlot',
+                      width: 100,
+                      render: (t) => <span style={{ color: '#ff4d4f', textDecoration: 'line-through' }}>{t}</span>,
+                    },
+                    {
+                      title: '调整后时段',
+                      dataIndex: 'adjustedTimeSlot',
+                      key: 'adjustedTimeSlot',
+                      width: 110,
+                      render: (t, r) => {
+                        if (r.status === APPOINTMENT_STATUS.AFFECTED) {
+                          return <Tag color="red">无法顺延</Tag>;
+                        }
+                        if (r.status === APPOINTMENT_STATUS.PENDING_CONFIRM) {
+                          return (
+                            <Tooltip title="时段未变，仅标记待确认">
+                              <Tag color="purple">{t || '待确认'}</Tag>
+                            </Tooltip>
+                          );
+                        }
+                        return t ? <span style={{ color: '#52c41a', fontWeight: 'bold' }}>{t}</span> : '-';
+                      },
+                    },
+                    {
+                      title: '影响原因',
+                      dataIndex: 'impactReason',
+                      key: 'impactReason',
+                      render: (r) => (
+                        <Tooltip title={r}>
+                          <span style={{ color: '#666', fontSize: 12 }}>
+                            {r && r.length > 30 ? r.substring(0, 30) + '...' : r || '-'}
+                          </span>
+                        </Tooltip>
+                      ),
+                    },
+                  ]}
+                />
               </div>
             )}
           </>

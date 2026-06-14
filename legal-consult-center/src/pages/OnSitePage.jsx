@@ -38,6 +38,9 @@ import {
   MATERIALS,
   TIME_SLOTS,
   URGENCY_LEVELS,
+  APPOINTMENT_STATUS_TEXT,
+  APPOINTMENT_STATUS,
+  getLawyerName,
 } from '../store/dataStore';
 
 const STATUS_MAP = {
@@ -48,6 +51,10 @@ const STATUS_MAP = {
   late: { text: '迟到', color: 'orange' },
   cancelled: { text: '已取消', color: 'default' },
   reallocated: { text: '已改派', color: 'purple' },
+  postponed: { text: '已顺延', color: 'orange' },
+  pending_confirm: { text: '待确认', color: 'purple' },
+  affected: { text: '受影响', color: 'red' },
+  completed: { text: '已完成', color: 'cyan' },
 };
 
 export default function OnSitePage() {
@@ -154,23 +161,110 @@ export default function OnSitePage() {
   };
 
   const handleEmergencySubmit = (values) => {
-    createEmergencyAid({
-      citizenName: values.citizenName,
-      citizenIdCard: values.citizenIdCard,
-      citizenPhone: values.phone,
-      lawyerId: values.lawyerId,
-      date: values.date.format('YYYY-MM-DD'),
-      timeSlot: values.timeSlot,
-      caseType: values.caseType,
-      caseReason: values.caseReason,
-      opposingParty: values.opposingParty,
-      urgency: 'emergency',
-      reason: values.reason,
-      materials: [],
-    });
-    message.success('紧急法律援助已创建');
-    emergencyForm.resetFields();
-    setEmergencyImpact(null);
+    const result = createEmergencyAid(
+      {
+        citizenName: values.citizenName,
+        citizenIdCard: values.citizenIdCard,
+        citizenPhone: values.phone,
+        lawyerId: values.lawyerId,
+        date: values.date.format('YYYY-MM-DD'),
+        timeSlot: values.timeSlot,
+        caseType: values.caseType,
+        caseReason: values.caseReason,
+        opposingParty: values.opposingParty,
+        urgency: 'emergency',
+        reason: values.reason,
+        materials: [],
+      },
+      '现场工作人员'
+    );
+
+    if (result && result.success) {
+      const impact = result.impact || {};
+      const affectedCount = impact.processedCount || 0;
+
+      if (affectedCount > 0) {
+        const postponedCount = impact.affectedDetails?.filter((d) => d.status === 'postponed').length || 0;
+        const affectedDirectCount = impact.affectedDetails?.filter((d) => d.status === 'affected').length || 0;
+        const pendingConfirmCount = impact.affectedDetails?.filter((d) => d.status === 'pending_confirm').length || 0;
+
+        const detailMsg = [
+          `紧急援助已创建（${result.appointment.id}）`,
+          `共影响 ${affectedCount} 个预约:`,
+          postponedCount > 0 ? `- 已顺延: ${postponedCount} 个` : '',
+          pendingConfirmCount > 0 ? `- 待确认: ${pendingConfirmCount} 个` : '',
+          affectedDirectCount > 0 ? `- 受影响(无法顺延): ${affectedDirectCount} 个` : '',
+          '请前往排班日历查看完整顺延信息',
+        ]
+          .filter(Boolean)
+          .join('\n');
+
+        Modal.warning({
+          title: '紧急援助已创建',
+          content: (
+            <div>
+              <p style={{ whiteSpace: 'pre-line' }}>{detailMsg}</p>
+              {impact.affectedDetails && impact.affectedDetails.length > 0 && (
+                <div style={{ marginTop: 12, maxHeight: 240, overflow: 'auto' }}>
+                  <Table
+                    size="small"
+                    pagination={false}
+                    dataSource={impact.affectedDetails}
+                    rowKey="id"
+                    columns={[
+                      { title: '群众', dataIndex: 'citizenName', key: 'name', width: 70 },
+                      {
+                        title: '原时段',
+                        dataIndex: 'originalTimeSlot',
+                        key: 'orig',
+                        width: 100,
+                        render: (t) => (
+                          <span style={{ color: '#ff4d4f', textDecoration: 'line-through' }}>
+                            {t}
+                          </span>
+                        ),
+                      },
+                      {
+                        title: '调整后',
+                        dataIndex: 'adjustedTimeSlot',
+                        key: 'adj',
+                        width: 100,
+                        render: (t, r) => {
+                          if (r.status === 'affected') return <Tag color="red">无法顺延</Tag>;
+                          if (r.status === 'pending_confirm') return <Tag color="purple">待确认</Tag>;
+                          return t ? <span style={{ color: '#52c41a', fontWeight: 'bold' }}>{t}</span> : '-';
+                        },
+                      },
+                      {
+                        title: '状态',
+                        dataIndex: 'status',
+                        key: 'st',
+                        width: 90,
+                        render: (s) => {
+                          const info = APPOINTMENT_STATUS_TEXT[s];
+                          return info ? (
+                            <Tag color={info.color}>{info.text}</Tag>
+                          ) : (
+                            <Tag>{s}</Tag>
+                          );
+                        },
+                      },
+                    ]}
+                  />
+                </div>
+              )}
+            </div>
+          ),
+          okText: '知道了',
+        });
+      } else {
+        message.success('紧急法律援助已创建，未影响其他预约');
+      }
+      emergencyForm.resetFields();
+      setEmergencyImpact(null);
+    } else {
+      message.error('紧急援助创建失败');
+    }
   };
 
   const handleCheckEmergencyImpact = () => {
